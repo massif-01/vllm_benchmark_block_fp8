@@ -1,0 +1,2 @@
+Automated Triton w8a8 block FP8 kernel tuning tool for vLLM. Auto-detects model architecture, supports Qwen3/DeepSeek-V3/custom models, multi-GPU parallel tuning, and generates optimized kernel configs for quantization.
+
