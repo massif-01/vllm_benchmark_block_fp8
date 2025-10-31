@@ -11,6 +11,7 @@ Automated Triton w8a8 block FP8 kernel tuning tool for vLLM. Automatically detec
 - 📊 **Flexible Configuration**: Support for different TP sizes, block sizes, and batch sizes
 - 🚀 **Preset Scripts**: Quick-start scripts for popular models (Qwen3, DeepSeek-V3)
 - ✅ **Environment Check**: Pre-flight checks to ensure environment readiness
+- 🔢 **Multiple Quantization Methods**: Support for FP8 (W8A8), INT8 (W8A8), and AWQ (W4A16)
 
 ## Quick Start
 
@@ -69,11 +70,34 @@ python benchmark_w8a8_block_fp8.py --tp-size 8 --input-type fp8
 
 The tool automatically detects weight shapes for:
 
-- **Qwen3 Series**: Qwen3-MoE, Qwen3-Next models
+- **Qwen3 Series**: Qwen3-MoE, Qwen3-Next, Qwen3-Coder, Qwen3-VL, Qwen3-Omni models
 - **DeepSeek-V3**: Default shapes built-in
 - **Generic Transformers**: Auto-detects from `hidden_size` and `intermediate_size`
 
 For unsupported models, the tool falls back to DeepSeek-V3 default shapes.
+
+## Available Tuning Scripts
+
+### 1. W8A8 Block FP8 (`benchmark_w8a8_block_fp8.py`)
+- **Quantization**: FP8 weights and activations (W8A8)
+- **Use Case**: High-performance inference with FP8-capable GPUs (Ada/Hopper)
+- **Requirements**: GPU compute capability >= 8.9
+
+### 2. W8A8 Block INT8 (`benchmark_w8a8_block_int8.py`)
+- **Quantization**: INT8 weights and activations (W8A8)
+- **Use Case**: Memory-efficient inference on GPUs with compute capability >= 7.5
+- **Requirements**: NVIDIA GPU (Turing/Ampere/Ada/Hopper)
+
+### 3. AWQ W4A16 (`benchmark_awq_w4a16.py`)
+- **Quantization**: 4-bit weights, 16-bit activations (W4A16)
+- **Use Case**: Maximum memory savings with good performance
+- **Requirements**: GPU compute capability >= 7.5
+- **Documentation**: See [README_AWQ.md](README_AWQ.md) for detailed usage
+
+### Model-Specific Scripts
+
+- `benchmark_w8a8_block_fp8_qwen3_30b.py`: Optimized for Qwen3-30B-A3B-Instruct-2507-Int8-W8A16
+- `benchmark_w8a8_block_fp8_qwen3omni_talker.py`: Optimized for Qwen3-Omni-30B-A3B-Instruct (talker config)
 
 ## Output
 
@@ -132,23 +156,41 @@ python benchmark_w8a8_block_fp8.py \
     --input-type fp8
 ```
 
+### Example 4: AWQ W4A16 Tuning
+
+```bash
+# Basic AWQ tuning
+python benchmark_awq_w4a16.py \
+    --tp-size 1 \
+    --group-size 128 \
+    --split-k-iters 1 \
+    --save-path ./awq_configs
+
+# See README_AWQ.md for detailed AWQ usage
+```
+
 ## Project Structure
 
 ```
 vllm_benchmark_block_fp8/
-├── README.md                      # English documentation
-├── README_zh.md                   # Chinese documentation
-├── benchmark_w8a8_block_fp8.py   # Main tuning script
-├── scripts/                       # Helper scripts
-│   ├── environment_check.sh      # Environment check
-│   ├── tune_qwen3_coder.sh      # Qwen3-Coder preset (optimized)
-│   ├── tune_qwen3.sh             # Qwen3 preset
-│   ├── tune_deepseek_v3.sh       # DeepSeek-V3 preset
-│   └── tune_custom.sh            # Custom model preset
-├── configs/                       # Configuration files
-│   └── model_shapes.json         # Model shape references
-└── examples/                      # Example scripts
-    └── tune_qwen3_models.sh     # Batch tuning example
+├── README.md                              # English documentation
+├── README_zh.md                           # Chinese documentation
+├── README_AWQ.md                          # AWQ W4A16 tuning documentation
+├── benchmark_w8a8_block_fp8.py            # W8A8 Block FP8 tuning script
+├── benchmark_w8a8_block_int8.py            # W8A8 Block INT8 tuning script
+├── benchmark_awq_w4a16.py                 # AWQ W4A16 tuning script
+├── benchmark_w8a8_block_fp8_qwen3_30b.py  # Qwen3-30B optimized script
+├── benchmark_w8a8_block_fp8_qwen3omni_talker.py  # Qwen3-Omni Talker optimized script
+├── scripts/                               # Helper scripts
+│   ├── environment_check.sh              # Environment check
+│   ├── tune_qwen3_coder.sh              # Qwen3-Coder preset (optimized)
+│   ├── tune_qwen3.sh                     # Qwen3 preset
+│   ├── tune_deepseek_v3.sh               # DeepSeek-V3 preset
+│   └── tune_custom.sh                    # Custom model preset
+├── configs/                               # Configuration files
+│   └── model_shapes.json                 # Model shape references
+└── examples/                              # Example scripts
+    └── tune_qwen3_models.sh             # Batch tuning example
 ```
 
 ## Prerequisites
