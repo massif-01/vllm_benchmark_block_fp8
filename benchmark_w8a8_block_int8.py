@@ -143,30 +143,35 @@ def get_configs_compute_bound():
 
 
 def get_weight_shapes(tp_size):
-    # NOTE: The weight shapes can be customized for your model.
-    # Default shapes are for common transformer models.
-    # Modify them if you tune for a specific model.
+    # NOTE: Weight shapes for Qwen3-Coder-30B-A3B-Instruct-FP8 (Qwen3Moe model)
+    # Config: hidden_size=2048, num_heads=32, num_kv_heads=4, head_dim=128,
+    #         moe_intermediate_size=768, num_experts=128, num_experts_per_tok=8
+    
+    # Attention QKV projection: (num_heads * head_dim + 2 * num_kv_heads * head_dim, hidden_size)
+    # = (32 * 128 + 2 * 4 * 128, 2048) = (5120, 2048)
+    # Attention O projection: (hidden_size, num_heads * head_dim)
+    # = (2048, 32 * 128) = (2048, 4096)
+    # MoE gate_up_proj (merged): (2 * moe_intermediate_size, hidden_size)
+    # = (2 * 768, 2048) = (1536, 2048)
+    # MoE down_proj: (hidden_size, moe_intermediate_size)
+    # = (2048, 768)
     
     # cannot TP (small shapes that don't benefit from TP or don't support it)
     total = [
-        (512 + 64, 7168),
-        (2112, 7168),
-        ((128 + 64) * 128, 7168),
-        (128 * (128 + 128), 512),
-        (7168, 16384),
-        (7168, 18432),
+        # Small shapes that typically don't use TP
     ]
+    
     # N can TP (RowParallelLinear - split output dimension)
     n_tp = [
-        (18432 * 2, 7168),
-        ((128 + 64) * 128, 7168),
-        (128 * (128 + 128), 512),
-        (24576, 1536),
-        (12288, 7168),
-        (4096, 7168),
+        (1536, 2048),  # MoE gate_up_proj (merged)
     ]
+    
     # K can TP (ColumnParallelLinear - split input dimension)
-    k_tp = [(7168, 18432), (7168, 16384), (7168, 2048)]
+    k_tp = [
+        (5120, 2048),  # Attention QKV projection
+        (2048, 4096),  # Attention O projection
+        (2048, 768),   # MoE down_proj
+    ]
 
     weight_shapes = []
     for t in total:
