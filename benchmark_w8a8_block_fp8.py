@@ -4,6 +4,8 @@
 # vLLM W8A8 Block FP8 Kernel Tuning Tool
 # vLLM W8A8 Block FP8 内核调优工具
 
+from __future__ import annotations
+
 import argparse
 import json
 import multiprocessing as mp
@@ -511,10 +513,10 @@ def save_configs(
         f.write("\n")
 
 
-def tune_on_gpu(args_dict):
+def tune_on_gpu(args_dict) -> Dict[Tuple[int, int], Dict[int, Dict[str, Any]]]:
     """
-    Run tuning on a specific GPU.
-    在特定 GPU 上运行调优
+    Run tuning on a specific GPU and return partial configs.
+    在特定 GPU 上运行调优并返回部分配置
     
     Args:
         args_dict: Dictionary containing GPU ID, batch sizes, weight shapes, and args / 
@@ -532,7 +534,6 @@ def tune_on_gpu(args_dict):
     block_n = args.block_n
     block_k = args.block_k
     out_dtype = DTYPE_MAP[args.out_dtype]
-    save_path = args.save_path
     input_type = args.input_type
 
     search_space = get_configs_compute_bound()
@@ -542,6 +543,7 @@ def tune_on_gpu(args_dict):
     ]
 
     start = time.time()
+    gpu_results: Dict[Tuple[int, int], Dict[int, Dict[str, Any]]] = {}
     for shape in tqdm(weight_shapes, desc=f"GPU {gpu_id} - Shapes"):
         N, K = shape[0], shape[1]
         print(f"[GPU {gpu_id}] Tune for weight shape of `N: {N}, K: {K}`")
@@ -558,11 +560,12 @@ def tune_on_gpu(args_dict):
             for batch_size in tqdm(batch_sizes, desc=f"GPU {gpu_id} - Batch sizes")
         ]
         best_configs = {M: config for M, config in zip(batch_sizes, benchmark_results)}
-        save_configs(N, K, block_n, block_k, best_configs, save_path, input_type)
+        gpu_results[(N, K)] = best_configs
 
     end = time.time()
     print(f"Tuning on GPU {gpu_id} took {end - start:.2f} seconds")
     print(f"GPU {gpu_id} 上的调优耗时 {end - start:.2f} 秒")
+    return gpu_results
 
 
 def distribute_batch_sizes(batch_sizes, num_gpus):
@@ -627,6 +630,7 @@ def main(args):
     else:
         batch_sizes = [args.batch_size]
         num_gpus = 1  # If only one batch size, use only one GPU / 如果只有一个批次大小，只使用一个 GPU
+    num_gpus = min(num_gpus, len(batch_sizes))
 
     # Get weight shapes for the model / 获取模型的权重形状
     if args.model:
@@ -645,6 +649,8 @@ def main(args):
 
     process_args = []
     for gpu_id in range(num_gpus):
+        if not batches_per_gpu[gpu_id]:
+            continue
         process_args.append(
             {
                 "gpu_id": gpu_id,
@@ -653,10 +659,51 @@ def main(args):
                 "args": args,
             }
         )
+    if not process_args:
+        raise RuntimeError("No batch sizes were assigned to GPUs for tuning")
+
+    participating_device_names = {
+        torch.cuda.get_device_name(process_arg["gpu_id"]) for process_arg in process_args
+    }
+    if len(participating_device_names) > 1:
+        raise RuntimeError(
+            "Multi-GPU tuning requires identical GPU models because output config "
+            f"filenames contain a single device_name. Found: {sorted(participating_device_names)}"
+        )
+    torch.cuda.set_device(process_args[0]["gpu_id"])
 
     ctx = mp.get_context("spawn")
-    with ctx.Pool(num_gpus) as pool:
-        pool.map(tune_on_gpu, process_args)
+    with ctx.Pool(len(process_args)) as pool:
+        partial_results = pool.map(tune_on_gpu, process_args)
+
+    merged_results: Dict[Tuple[int, int], Dict[int, Dict[str, Any]]] = {
+        (shape[0], shape[1]): {} for shape in weight_shapes
+    }
+    for gpu_results in partial_results:
+        for shape, configs in gpu_results.items():
+            merged_results[shape].update(configs)
+
+    for shape in weight_shapes:
+        N, K = shape[0], shape[1]
+        configs = merged_results[(N, K)]
+        missing_batch_sizes = [M for M in batch_sizes if M not in configs]
+        if missing_batch_sizes:
+            raise RuntimeError(
+                f"Missing tuned configs for N={N}, K={K}, batch sizes={missing_batch_sizes}"
+            )
+
+    for shape in weight_shapes:
+        N, K = shape[0], shape[1]
+        ordered_configs = {M: merged_results[(N, K)][M] for M in batch_sizes}
+        save_configs(
+            N,
+            K,
+            args.block_n,
+            args.block_k,
+            ordered_configs,
+            args.save_path,
+            args.input_type,
+        )
 
     print("Multi-GPU tuning completed")
     print("多 GPU 调优完成")
@@ -707,4 +754,3 @@ Then copy generated configs to: model_executor/layers/quantization/utils/configs
     args = parser.parse_args()
 
     main(args)
-
